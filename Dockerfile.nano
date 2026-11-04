@@ -1,0 +1,53 @@
+# Jetson Nano / JetPack 4.x GPU image. The base image is published by
+# Ultralytics specifically for Nano/TX2/Xavier running JetPack 4.
+FROM ultralytics/ultralytics:8.4.201-jetson-jetpack4
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    DISPLAY=:99 \
+    QT_X11_NO_MITSHM=1 \
+    YOLO_CONFIG_DIR=/tmp/Ultralytics
+
+# JetPack 4's Ubuntu packages provide PyQt for the system Python, while the
+# official YOLO image uses Python 3.8. Build the binding against that interpreter.
+RUN apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 update \
+    && apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 install -y --fix-missing --no-install-recommends \
+    build-essential \
+    fonts-wqy-zenhei \
+    libegl1 \
+    libgl1 \
+    libglib2.0-0 \
+    libxkbcommon-x11-0 \
+    novnc \
+    openbox \
+    python3.8-dev \
+    qt5-default \
+    qtbase5-dev \
+    qttools5-dev-tools \
+    websockify \
+    x11vnc \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir pyserial==3.5 PyQt5-sip \
+    && python3 -m pip install --no-cache-dir --config-settings=confirm-license= \
+       --config-settings=qmake=/usr/bin/qmake PyQt5==5.15.10
+
+RUN apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 update \
+    && apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-render-util0 \
+    libxcb-shape0 \
+    libxcb-xinerama0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY . /workspace
+RUN chmod +x /workspace/docker/start-ui.sh
+
+EXPOSE 6080 5900
+CMD ["/workspace/docker/start-ui.sh"]

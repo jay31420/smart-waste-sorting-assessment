@@ -1,0 +1,9 @@
+# Small multi-architecture image for the hardware-free lower-controller simulator.
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1
+WORKDIR /workspace
+COPY simulator /workspace/simulator
+
+EXPOSE 9000
+CMD ["python3", "-m", "simulator.lower_simulator", "--host", "0.0.0.0", "--port", "9000"]

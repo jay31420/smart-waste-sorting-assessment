@@ -1,0 +1,32 @@
+services:
+  lower-sim:
+    build:
+      context: .
+      dockerfile: Dockerfile.sim
+    command: ["python3", "-m", "simulator.lower_simulator", "--host", "0.0.0.0", "--port", "9000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1',9000),1); s.close()"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SIM_HOST: lower-sim
+      SIM_PORT: "9000"
+      DISPLAY: ":99"
+      SOURCE: video
+      SOURCE_VALUE: assets/assessment_demo.mp4
+      YOLO_WEIGHTS: Predict/best.pt
+    depends_on:
+      lower-sim:
+        condition: service_healthy
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+    command: ["/workspace/docker/start-ui.sh"]
+    restart: unless-stopped
