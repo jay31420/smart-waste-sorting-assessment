@@ -25,6 +25,25 @@ class VideoSourceTests(unittest.TestCase):
         finally:
             source.release()
 
+    def test_original_project_video_supports_seek_and_restart(self):
+        video = Path("vedio/dep.mp4")
+        self.assertTrue(video.is_file())
+        source = create_frame_source("video", str(video))
+        try:
+            self.assertEqual(source.frame_count, 2839)
+            self.assertAlmostEqual(source.source_fps, 30.0, places=1)
+            ok, first = source.read()
+            self.assertTrue(ok)
+            self.assertEqual(first.shape[:2], (720, 1280))
+            self.assertTrue(source.seek_frame(100))
+            ok, later = source.read()
+            self.assertTrue(ok)
+            self.assertEqual(later.shape, first.shape)
+            self.assertTrue(source.restart())
+            self.assertLessEqual(source.current_frame, 1)
+        finally:
+            source.release()
+
     def test_synthetic_source_is_not_available(self):
         with self.assertRaises(ValueError):
             create_frame_source("synthetic")

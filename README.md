@@ -13,6 +13,7 @@
 
 - 比赛 YOLO 权重 `Predict/best.pt`；
 - 由真实比赛照片制作的 `assets/assessment_demo.mp4`；
+- 原项目长视频 `vedio/dep.mp4`，用于视频跳转、暂停、重播和资源释放验收；
 - 可构建的普通电脑 Docker 环境和 Jetson Nano/JetPack 4 镜像配置；
 - 独立的 TCP 下位机模拟器；
 - PyQt 界面骨架、后台线程、视频源和传输层；
@@ -21,7 +22,7 @@
 ## 从这里开始
 
 1. 阅读 [TASKS.md](TASKS.md) 和 [PROTOCOL.md](PROTOCOL.md)。
-2. 搜索代码中的 `TODO`，依次完成协议、YOLO、状态机和 UI 输入功能。
+2. 搜索代码中的 `TODO`，依次完成协议、YOLO、状态机、`vedio` 视频模块和 UI 输入功能。
 3. 先运行公开测试，再启动完整 Docker 演示。
 
 ```bash
@@ -73,3 +74,5 @@ docker compose -f compose.yaml -f compose.nano.yaml up --build
 - 请勿提交虚拟环境、Docker 镜像或额外的大体积模型。
 
 最终提交要求、评分和验收场景见 [TASKS.md](TASKS.md)。
+
+最终提交物为：3–4 分钟运行录屏、1 份设计说明与流程 PPT、可访问的 GitHub 源代码链接；提交后还会进行现场代码问辩。
