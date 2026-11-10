@@ -39,8 +39,17 @@ class VideoSourceTests(unittest.TestCase):
             ok, later = source.read()
             self.assertTrue(ok)
             self.assertEqual(later.shape, first.shape)
+            self.assertFalse(source.seek_frame(-1))
+            self.assertFalse(source.seek_frame(source.frame_count))
             self.assertTrue(source.restart())
             self.assertLessEqual(source.current_frame, 1)
+
+            self.assertTrue(source.seek_frame(source.frame_count - 1))
+            ok, _ = source.read()
+            self.assertTrue(ok)
+            ok, frame = source.read()
+            self.assertFalse(ok)
+            self.assertIsNone(frame)
         finally:
             source.release()
 
@@ -90,6 +99,24 @@ class _FakeYolo:
         return [_Result()]
 
 
+class _MultiBoxResult:
+    names = {0: "battery", 1: "box"}
+
+    def __init__(self):
+        self.boxes = [
+            type("Box", (), {"conf": _Scalar(0.65), "cls": _Scalar(1), "xyxy": [_Coordinates([1, 2, 3, 4])]})(),
+            type("Box", (), {"conf": _Scalar(0.91), "cls": _Scalar(0), "xyxy": [_Coordinates([10, 20, 80, 90])]})(),
+            type("Box", (), {"conf": _Scalar(0.20), "cls": _Scalar(1), "xyxy": [_Coordinates([0, 0, 1, 1])]})(),
+        ]
+
+
+class _MultiBoxYolo:
+    names = _MultiBoxResult.names
+
+    def predict(self, **kwargs):
+        return [_MultiBoxResult()]
+
+
 class YoloAdapterTests(unittest.TestCase):
     def test_yolo_api_is_adapted_without_loading_real_weights(self):
         fake_model = _FakeYolo()
@@ -99,6 +126,13 @@ class YoloAdapterTests(unittest.TestCase):
         self.assertEqual(output[0].waste_type, WasteType.HAZARDOUS)
         self.assertEqual(output[0].box, (10, 20, 80, 120))
         self.assertIs(fake_model.calls[0]["source"], frame)
+
+    def test_detections_are_filtered_and_sorted_by_confidence(self):
+        detector = YoloDetector(model=_MultiBoxYolo())
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        output = detector.detect(frame)
+        self.assertEqual([item.class_name for item in output], ["battery", "box"])
+        self.assertEqual([item.confidence for item in output], [0.91, 0.65])
 
     def test_unknown_model_class_is_rejected(self):
         model = _FakeYolo()

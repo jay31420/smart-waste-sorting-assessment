@@ -40,6 +40,7 @@ class SortingWorker(QtCore.QThread):
     log_message = QtCore.pyqtSignal(str)
     connection_changed = QtCore.pyqtSignal(bool)
     fps_changed = QtCore.pyqtSignal(float)
+    progress_changed = QtCore.pyqtSignal(int, int, float)
 
     def __init__(
         self,
@@ -69,6 +70,7 @@ class SortingWorker(QtCore.QThread):
         self._settings_lock = threading.Lock()
         self._reset_requested = False
         self._restart_requested = False
+        self._seek_request = None
         self._source_change = None
         self._controller = None  # type: Optional[SortingController]
         self._source = None  # type: Optional[FrameSource]
@@ -96,6 +98,7 @@ class SortingWorker(QtCore.QThread):
             if self._at_video_end:
                 self._restart_requested = True
         self._running_event.set()
+        self.state_changed.emit("正在识别")
 
     def pause_processing(self) -> None:
         self._running_event.clear()
@@ -108,6 +111,10 @@ class SortingWorker(QtCore.QThread):
     def request_source(self, kind: str, value: str = "") -> None:
         with self._settings_lock:
             self._source_change = (kind, value)
+
+    def request_seek_frame(self, frame_index: int) -> None:
+        with self._settings_lock:
+            self._seek_request = int(frame_index)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -131,6 +138,8 @@ class SortingWorker(QtCore.QThread):
             self._reset_requested = False
             restart_requested = self._restart_requested
             self._restart_requested = False
+            seek_request = self._seek_request
+            self._seek_request = None
             source_change = self._source_change
             self._source_change = None
 
@@ -147,12 +156,27 @@ class SortingWorker(QtCore.QThread):
                     old_source.release()
                 self._at_video_end = False
                 self.source_changed.emit(new_source.display_name)
+                self._emit_progress(0)
                 self.detection_changed.emit(None)
                 self.log_message.emit("图像源已切换：{}".format(new_source.display_name))
         if restart_requested and self._source is not None:
             if self._source.restart():
                 self._at_video_end = False
+                self._emit_progress(0)
                 self.log_message.emit("视频已从头开始")
+        if seek_request is not None:
+            if self._source is None or self._source.kind != "video":
+                self.log_message.emit("当前图像源不支持视频跳转")
+            elif not self._source.seek_frame(seek_request):
+                self.log_message.emit("视频跳转失败：帧位置超出范围")
+            else:
+                self._at_video_end = False
+                self._emit_progress(seek_request)
+                if not self._running_event.is_set():
+                    ok, frame = self._source.read()
+                    if ok and frame is not None:
+                        self.frame_ready.emit(self._to_qimage(frame))
+                        self._emit_progress(max(0, self._source.current_frame - 1))
 
     @staticmethod
     def _to_qimage(frame) -> QtGui.QImage:
@@ -161,6 +185,18 @@ class SortingWorker(QtCore.QThread):
         return QtGui.QImage(
             rgb.data, width, height, channels * width, QtGui.QImage.Format_RGB888
         ).copy()
+
+    def _emit_progress(self, frame_index=None) -> None:
+        if self._source is None or self._source.kind != "video":
+            self.progress_changed.emit(0, 0, 0.0)
+            return
+        if frame_index is None:
+            frame_index = max(0, self._source.current_frame - 1)
+        self.progress_changed.emit(
+            max(0, int(frame_index)),
+            self._source.frame_count,
+            self._source.source_fps,
+        )
 
     @staticmethod
     def _draw_detections(frame, detections) -> None:
@@ -206,6 +242,7 @@ class SortingWorker(QtCore.QThread):
 
             self._source = create_frame_source(self.source_kind, self.source_value)
             self.source_changed.emit(self._source.display_name)
+            self._emit_progress(0)
             self.log_message.emit("图像源已打开：{}".format(self._source.display_name))
 
             while not self._stop_event.is_set():
@@ -236,8 +273,12 @@ class SortingWorker(QtCore.QThread):
                         self._running_event.clear()
                         self.detection_changed.emit(None)
                         self.source_finished.emit()
-                        self.state_changed.emit("视频播放完成")
-                        self.log_message.emit("视频播放完成，再次开始可从头播放")
+                        if self._source.frame_count and self._source.current_frame >= self._source.frame_count:
+                            self.state_changed.emit("视频播放完成")
+                            self.log_message.emit("视频播放完成，再次开始可从头播放")
+                        else:
+                            self.state_changed.emit("视频读取失败")
+                            self.log_message.emit("视频无法解码或读取中断，请检查文件格式")
                     else:
                         self.log_message.emit("摄像头读取失败")
                         self.msleep(200)
@@ -255,6 +296,7 @@ class SortingWorker(QtCore.QThread):
 
                 self._draw_detections(frame, detections)
                 self.frame_ready.emit(self._to_qimage(frame))
+                self._emit_progress()
 
                 completed = time.monotonic()
                 frame_times.append(completed)

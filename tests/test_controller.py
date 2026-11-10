@@ -65,6 +65,55 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.transport.sent, [])
         self.assertEqual(self.controller.state, SystemState.COOLDOWN)
 
+    def test_completed_object_is_not_sent_again_until_it_leaves(self):
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        sequence = self.transport.sent[0].payload[0]
+        self.transport.feed(Packet(Command.ACTION_DONE, bytes((sequence,))))
+        self.controller.poll()
+
+        for _ in range(10):
+            self.controller.process_detection(self.detection)
+        self.assertEqual(len(self.transport.sent), 1)
+
+        for _ in range(3):
+            self.controller.process_detection(None)
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        self.assertEqual(len(self.transport.sent), 2)
+
+    def test_action_done_for_another_sequence_does_not_count(self):
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        self.controller.handle_packet(Packet(Command.ACTION_DONE, b"\xFF"))
+        self.assertEqual(self.controller.counts[WasteType.RECYCLABLE], 0)
+
+    def test_reset_does_not_discard_an_in_flight_sort(self):
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        sequence = self.transport.sent[0].payload[0]
+        self.controller.reset()
+        self.transport.feed(Packet(Command.ACTION_DONE, bytes((sequence,))))
+        self.controller.poll()
+        self.assertEqual(self.controller.counts[WasteType.RECYCLABLE], 1)
+
+    def test_compression_starts_once_after_count_threshold(self):
+        self.controller.compress_after = 1
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        sequence = self.transport.sent[0].payload[0]
+        self.transport.feed(Packet(Command.ACTION_DONE, bytes((sequence,))))
+        self.controller.poll()
+
+        self.assertEqual(self.controller.counts[WasteType.RECYCLABLE], 1)
+        self.assertEqual(self.transport.sent[1].command, Command.START_COMPRESS)
+        self.assertEqual(self.controller.state, SystemState.COMPRESSING)
+
+        compress_sequence = self.transport.sent[1].payload[0]
+        self.transport.feed(Packet(Command.ACTION_DONE, bytes((compress_sequence,))))
+        self.controller.poll()
+        self.assertEqual(self.controller.state, SystemState.COOLDOWN)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
-"""供 YOLO 逐帧处理的视频文件模块骨架。
+"""供 YOLO 逐帧处理的视频文件输入源。
 
 原比赛代码使用 QMediaPlayer 直接播放视频，画面无法可靠地逐帧交给 YOLO。
-本考核保留原 ``vedio`` 目录名，但统一使用 OpenCV 输出 BGR 帧。
+本考核保留原 ``vedio`` 目录名，统一使用 OpenCV 输出 BGR 帧。
 """
 
 from pathlib import Path
@@ -14,8 +14,7 @@ import numpy as np
 class VideoFileSource:
     """视频文件输入源。
 
-    打开文件、读取元数据和释放资源的框架已给出。学员需要完成逐帧读取、
-    跳转与重新播放，并把进度反馈接入 UI。
+    打开文件、读取元数据、逐帧读取、跳转、重播和释放资源。
     """
 
     kind = "video"
@@ -39,12 +38,23 @@ class VideoFileSource:
         return int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
-        """TODO 10：读取下一帧，正确处理视频结尾和解码失败。"""
-        return False, None
+        """读取下一帧；视频结束或解码失败时返回 ``(False, None)``。"""
+        if not self.cap.isOpened():
+            return False, None
+        ok, frame = self.cap.read()
+        if not ok or frame is None:
+            return False, None
+        return True, frame
 
     def seek_frame(self, frame_index: int) -> bool:
-        """TODO 11：校验范围并跳转到指定帧。"""
-        return False
+        """跳转到有效帧索引；无效索引或后端拒绝时返回 ``False``。"""
+        try:
+            frame_index = int(frame_index)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if frame_index < 0 or frame_index >= self.frame_count:
+            return False
+        return bool(self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index))
 
     def restart(self) -> bool:
         """从第 0 帧重新播放。"""

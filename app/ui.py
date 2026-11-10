@@ -16,6 +16,10 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.worker = worker
         self._processing = False
+        self._scrubbing = False
+        self._seek_target = None
+        self._video_frame_count = 0
+        self._video_fps = 0.0
         self.count_labels = {}  # type: Dict[str, QtWidgets.QLabel]
         self.bin_labels = {}  # type: Dict[str, QtWidgets.QLabel]
         self._build_ui()
@@ -40,6 +44,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_ui(self) -> None:
         self.setWindowTitle("智能垃圾分拣系统 · 招新考核")
         self.resize(1280, 820)
+        self.setMinimumSize(960, 680)
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         root = QtWidgets.QVBoxLayout(central)
@@ -53,10 +58,12 @@ class MainWindow(QtWidgets.QMainWindow):
         header.addWidget(QtWidgets.QLabel("系统状态："))
         self.state_label = QtWidgets.QLabel("等待启动")
         self.state_label.setMinimumWidth(130)
+        self.state_label.setObjectName("stateLabel")
         header.addWidget(self.state_label)
         header.addWidget(QtWidgets.QLabel("下位机："))
         self.connection_label = QtWidgets.QLabel("未连接")
         self.connection_label.setMinimumWidth(75)
+        self.connection_label.setObjectName("connectionLabel")
         header.addWidget(self.connection_label)
         header.addWidget(QtWidgets.QLabel("FPS："))
         self.fps_label = QtWidgets.QLabel("0")
@@ -78,9 +85,10 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         vision_group = QtWidgets.QGroupBox("目标检测画面")
         vision_layout = QtWidgets.QVBoxLayout(vision_group)
-        self.camera_label = QtWidgets.QLabel("导入视频或打开摄像头，然后点击“开始识别”")
+        self.camera_label = QtWidgets.QLabel("等待图像源")
         self.camera_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.camera_label.setMinimumSize(760, 470)
+        self.camera_label.setMinimumSize(400, 300)
+        self.camera_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.camera_label.setFrameShape(QtWidgets.QFrame.Box)
         vision_layout.addWidget(self.camera_label)
         splitter.addWidget(vision_group)
@@ -131,13 +139,27 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.setStretchFactor(1, 2)
         root.addWidget(splitter, 1)
 
-        controls = QtWidgets.QGroupBox("运行控制（布局与视觉样式由学员继续优化）")
+        progress_layout = QtWidgets.QHBoxLayout()
+        self.time_label = QtWidgets.QLabel("00:00 / 00:00")
+        self.time_label.setMinimumWidth(112)
+        self.progress_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.progress_slider.setRange(0, 0)
+        self.progress_slider.setEnabled(False)
+        self.progress_slider.setToolTip("拖动后跳转到对应视频位置")
+        progress_layout.addWidget(self.time_label)
+        progress_layout.addWidget(self.progress_slider, 1)
+        root.addLayout(progress_layout)
+
+        controls = QtWidgets.QGroupBox("运行控制")
         controls_layout = QtWidgets.QHBoxLayout(controls)
         self.video_button = QtWidgets.QPushButton("导入视频")
         self.camera_button = QtWidgets.QPushButton("打开摄像头")
         self.start_button = QtWidgets.QPushButton("开始识别")
+        self.start_button.setObjectName("primaryButton")
         self.reset_button = QtWidgets.QPushButton("重置统计")
+        self.reset_button.setObjectName("secondaryButton")
         self.quit_button = QtWidgets.QPushButton("退出")
+        self.quit_button.setObjectName("quitButton")
         controls_layout.addWidget(self.video_button)
         controls_layout.addWidget(self.camera_button)
         controls_layout.addStretch(1)
@@ -146,15 +168,26 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(self.quit_button)
         root.addWidget(controls)
 
-        # The UI is complete but intentionally restrained: visual hierarchy,
-        # responsive layout and interaction polish remain assessment work.
         self.setStyleSheet(
-            "QMainWindow { background: #f4f5f7; }"
-            "QGroupBox { font-weight: bold; margin-top: 8px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 8px; }"
-            "QPushButton { min-width: 105px; min-height: 34px; }"
-            "QPlainTextEdit { background: white; font-family: Consolas, monospace; }"
-            "#titleLabel { color: #263238; }"
+            "QMainWindow { background: #edf2f3; }"
+            "QWidget { color: #263638; font-family: 'Microsoft YaHei'; font-size: 10pt; }"
+            "QGroupBox { background: #ffffff; border: 1px solid #d3dddf; border-radius: 5px; "
+            "font-weight: 600; margin-top: 10px; padding: 8px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #344b4c; }"
+            "QPushButton { background: #ffffff; border: 1px solid #c6d2d4; border-radius: 4px; "
+            "min-width: 98px; min-height: 34px; padding: 0 10px; }"
+            "QPushButton:hover { background: #e8f3f1; border-color: #16877b; }"
+            "QPushButton:pressed { background: #d5e8e5; }"
+            "QPushButton#primaryButton { background: #087f73; color: #ffffff; border-color: #087f73; font-weight: 600; }"
+            "QPushButton#primaryButton:hover { background: #066d63; }"
+            "QPushButton#quitButton:hover { background: #fff0ee; border-color: #c45145; color: #a53d33; }"
+            "QPlainTextEdit { background: #fbfcfc; border: 1px solid #d6dfe1; "
+            "font-family: Consolas, monospace; font-size: 9pt; }"
+            "QLabel#titleLabel { color: #163f3d; }"
+            "QLabel#stateLabel, QLabel#connectionLabel { background: #e7eeee; border-radius: 3px; padding: 3px 6px; }"
+            "QSlider::groove:horizontal { height: 5px; background: #d6e0e1; border-radius: 2px; }"
+            "QSlider::sub-page:horizontal { background: #16877b; border-radius: 2px; }"
+            "QSlider::handle:horizontal { width: 13px; margin: -5px 0; border-radius: 6px; background: #087f73; }"
         )
 
     def _connect_signals(self) -> None:
@@ -163,27 +196,115 @@ class MainWindow(QtWidgets.QMainWindow):
         self.start_button.clicked.connect(self.toggle_processing)
         self.reset_button.clicked.connect(self.worker.request_reset)
         self.quit_button.clicked.connect(self.close)
+        self.progress_slider.sliderPressed.connect(self.begin_scrubbing)
+        self.progress_slider.sliderReleased.connect(self.seek_video)
+        self.progress_slider.valueChanged.connect(self.update_scrub_time)
         self.worker.frame_ready.connect(self.update_frame)
-        self.worker.state_changed.connect(self.state_label.setText)
+        self.worker.state_changed.connect(self.update_state)
         self.worker.counts_changed.connect(self.update_counts)
         self.worker.bins_changed.connect(self.update_bins)
         self.worker.detection_changed.connect(self.update_detection)
         self.worker.model_changed.connect(self.model_label.setText)
-        self.worker.source_changed.connect(self.source_label.setText)
+        self.worker.source_changed.connect(self.update_source)
         self.worker.source_finished.connect(self.on_source_finished)
         self.worker.log_message.connect(self.append_log)
         self.worker.connection_changed.connect(self.update_connection)
         self.worker.fps_changed.connect(lambda value: self.fps_label.setText("{:.0f}".format(value)))
+        self.worker.progress_changed.connect(self.update_progress)
 
     @QtCore.pyqtSlot()
     def import_video(self) -> None:
-        """TODO 8：弹出视频选择框并调用 worker.request_source。"""
-        self.append_log("TODO：请完成视频导入功能")
+        """选择视频文件并请求后台线程切换输入源。"""
+        path, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "选择视频",
+            str(Path.cwd()),
+            "视频文件 (*.mp4 *.avi *.mov *.mkv *.wmv);;所有文件 (*)",
+        )
+        if path:
+            self.worker.request_source("video", path)
 
     @QtCore.pyqtSlot()
     def open_camera(self) -> None:
-        """TODO 9：选择/打开摄像头并调用 worker.request_source。"""
-        self.append_log("TODO：请完成摄像头输入功能")
+        """选择摄像头编号并请求后台线程切换输入源。"""
+        camera_index, accepted = QtWidgets.QInputDialog.getInt(
+            self,
+            "打开摄像头",
+            "摄像头编号",
+            0,
+            0,
+            16,
+            1,
+        )
+        if accepted:
+            self.worker.request_source("camera", str(camera_index))
+
+    @QtCore.pyqtSlot()
+    def seek_video(self) -> None:
+        if self.progress_slider.isEnabled():
+            self._seek_target = self.progress_slider.value()
+            self._scrubbing = True
+            self.worker.request_seek_frame(self._seek_target)
+        else:
+            self._scrubbing = False
+            self._seek_target = None
+
+    @QtCore.pyqtSlot()
+    def begin_scrubbing(self) -> None:
+        self._scrubbing = True
+
+    @QtCore.pyqtSlot(int, int, float)
+    def update_progress(self, frame_index: int, frame_count: int, fps: float) -> None:
+        enabled = frame_count > 0 and fps > 0
+        self._video_frame_count = frame_count if enabled else 0
+        self._video_fps = fps if enabled else 0.0
+        self.progress_slider.setEnabled(enabled)
+        self.progress_slider.blockSignals(True)
+        if enabled:
+            self.progress_slider.setRange(0, max(0, frame_count - 1))
+            if self._seek_target is not None and frame_index == self._seek_target:
+                self._seek_target = None
+                self._scrubbing = False
+            if self._scrubbing:
+                self.progress_slider.setValue(self.progress_slider.value())
+                shown_frame = self.progress_slider.value()
+            else:
+                self.progress_slider.setValue(min(frame_index, frame_count - 1))
+                shown_frame = frame_index
+            current_seconds = max(0, shown_frame) / fps
+            total_seconds = frame_count / fps
+            self.time_label.setText(
+                "{} / {}".format(self._format_time(current_seconds), self._format_time(total_seconds))
+            )
+        else:
+            self._seek_target = None
+            self._scrubbing = False
+            self.progress_slider.setRange(0, 0)
+            self.time_label.setText("实时输入")
+        self.progress_slider.blockSignals(False)
+
+    @QtCore.pyqtSlot(int)
+    def update_scrub_time(self, frame_index: int) -> None:
+        if self._scrubbing and self._video_fps > 0:
+            self.time_label.setText(
+                "{} / {}".format(
+                    self._format_time(frame_index / self._video_fps),
+                    self._format_time(self._video_frame_count / self._video_fps),
+                )
+            )
+
+    @QtCore.pyqtSlot(str)
+    def update_source(self, name: str) -> None:
+        self.source_label.setText(name)
+        self._scrubbing = False
+        self._seek_target = None
+        if not self._processing:
+            self.start_button.setText("开始识别")
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        seconds = max(0, int(seconds))
+        return "{:02d}:{:02d}".format(seconds // 60, seconds % 60)
 
     def _set_processing(self, enabled: bool) -> None:
         self._processing = enabled
@@ -203,6 +324,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_source_finished(self) -> None:
         self._processing = False
         self.start_button.setText("重新播放")
+
+    @QtCore.pyqtSlot(str)
+    def update_state(self, value: str) -> None:
+        self.state_label.setText(value)
+        if "异常" in value or "失败" in value:
+            color = "#a53d33"
+            background = "#fff0ee"
+        elif "暂停" in value or "完成" in value:
+            color = "#7c5a16"
+            background = "#fbf2dc"
+        elif "执行" in value or "等待下位机" in value:
+            color = "#176c88"
+            background = "#e5f2f6"
+        else:
+            color = "#087f73"
+            background = "#e3f1ef"
+        self.state_label.setStyleSheet("color: {}; background: {};".format(color, background))
 
     @QtCore.pyqtSlot(QtGui.QImage)
     def update_frame(self, image: QtGui.QImage) -> None:
@@ -248,7 +386,11 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot(bool)
     def update_connection(self, connected: bool) -> None:
         self.connection_label.setText("已连接" if connected else "未连接")
-        self.connection_label.setStyleSheet("color: #2e7d32;" if connected else "color: #c62828;")
+        self.connection_label.setStyleSheet(
+            "color: #087f73; background: #e3f1ef;"
+            if connected
+            else "color: #a53d33; background: #fff0ee;"
+        )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         self.worker.stop()

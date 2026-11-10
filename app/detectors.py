@@ -1,4 +1,4 @@
-"""YOLO 适配器骨架。模型加载代码已给出，推理结果转换由学员完成。"""
+"""YOLO 检测器适配与统一结果类型。"""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -73,14 +73,78 @@ class YoloDetector(Detector):
 
         self.confidence = confidence
         model_names = getattr(self.model, "names", {})
-        unknown = sorted(set(model_names.values()) - set(self.DEFAULT_CLASS_MAP))
+        names = model_names.values() if isinstance(model_names, dict) else model_names
+        unknown = sorted(set(names) - set(self.DEFAULT_CLASS_MAP))
         if unknown:
             raise ValueError("权重中存在未配置类别：{}".format(", ".join(unknown)))
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
-        """TODO 3：调用 ``model.predict`` 并转换 boxes、类别和置信度。
+        """调用 YOLO 并将其框结果转换为项目内部的数据结构。"""
+        results = self.model.predict(
+            source=frame,
+            conf=self.confidence,
+            device=self.device,
+            verbose=False,
+        )
+        detections = []  # type: List[Detection]
 
-        返回结果应按置信度从高到低排列。可使用测试中的 FakeYolo 学习接口，
-        无需为了完成本方法反复加载真实权重。
-        """
-        return []
+        for result in results or []:
+            names = getattr(result, "names", None) or getattr(self.model, "names", {})
+            boxes = getattr(result, "boxes", None)
+            if boxes is None:
+                continue
+
+            for box in boxes:
+                confidence = self._scalar(getattr(box, "conf", 0.0))
+                if not np.isfinite(confidence) or confidence < self.confidence:
+                    continue
+
+                class_id = int(self._scalar(getattr(box, "cls", -1)))
+                class_name = self._class_name(names, class_id)
+                waste_type = self.DEFAULT_CLASS_MAP.get(class_name)
+                if waste_type is None:
+                    continue
+
+                coordinates = getattr(box, "xyxy", None)
+                if coordinates is None:
+                    continue
+                if isinstance(coordinates, (list, tuple)):
+                    if not coordinates:
+                        continue
+                    coordinates = coordinates[0]
+                elif getattr(coordinates, "ndim", 0) > 1:
+                    coordinates = coordinates[0]
+                if hasattr(coordinates, "cpu"):
+                    coordinates = coordinates.cpu()
+                if hasattr(coordinates, "numpy"):
+                    coordinates = coordinates.numpy()
+                coordinates = np.asarray(coordinates).reshape(-1)
+                if coordinates.size < 4:
+                    continue
+
+                x1, y1, x2, y2 = (int(float(value)) for value in coordinates[:4])
+                detections.append(
+                    Detection(
+                        waste_type=waste_type,
+                        class_name=class_name,
+                        confidence=confidence,
+                        box=(x1, y1, x2, y2),
+                    )
+                )
+
+        detections.sort(key=lambda detection: detection.confidence, reverse=True)
+        return detections
+
+    @staticmethod
+    def _scalar(value) -> float:
+        if hasattr(value, "item"):
+            value = value.item()
+        return float(value)
+
+    @staticmethod
+    def _class_name(names, class_id: int) -> str:
+        try:
+            name = names[class_id]
+        except (IndexError, KeyError, TypeError):
+            return ""
+        return str(name)
