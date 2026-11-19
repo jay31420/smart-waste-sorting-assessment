@@ -10,6 +10,12 @@ Windows 摄像头
 -> YOLO 与分拣状态机
 ```
 
+## 一键启动
+
+双击项目根目录的 `start_demo.bat`。脚本会依次启动摄像头桥、构建并启动 Docker 容器，然后打开 noVNC 页面。
+
+停止演示时双击 `stop_demo.bat`。它会关闭摄像头桥并停止 Docker 演示容器，但不会删除镜像和构建缓存。
+
 ## 启动顺序
 
 在项目根目录打开一个 PowerShell 窗口：
