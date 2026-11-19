@@ -48,9 +48,10 @@ for ($attempt = 0; $attempt -lt 20; $attempt += 1) {
 }
 
 if (-not $cameraReady) {
-    Write-Warning "摄像头桥未就绪；Docker 仍会启动，但网页摄像头不可用。"
+    Write-Warning "Camera bridge is not ready. Docker will still start."
 }
 
 docker compose up --build -d
-Start-Process "http://localhost:6080/vnc.html?autoconnect=1&resize=scale"
-Write-Host "演示环境已启动。"
+$demoUrl = "http://localhost:6080/vnc.html?autoconnect=1" + [char]38 + "resize=scale"
+Start-Process $demoUrl
+Write-Host "Demo environment started."

@@ -7,4 +7,4 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" 
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 docker compose stop
-Write-Host "摄像头桥和 Docker 演示容器已停止。"
+Write-Host "Camera bridge and Docker demo containers stopped."
