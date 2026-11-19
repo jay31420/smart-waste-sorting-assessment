@@ -1,14 +1,214 @@
 """Intentionally plain PyQt UI for the student assessment."""
 
 import datetime
+import os
 from pathlib import Path
 from typing import Dict
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from .audio import AudioFeedback
 from .detectors import Detection
 from .protocol import WASTE_NAMES, WasteType
+from .scene import PaintedLandscape, SceneOverlay
 from .worker import SortingWorker
+
+
+class FeedbackButton(QtWidgets.QPushButton):
+    def __init__(self, text, audio, parent=None):
+        super().__init__(text, parent)
+        self._audio = audio
+        self.pressed.connect(self._pressed)
+
+    def _pressed(self):
+        self._audio.play_click()
+
+
+class AudioCheckBox(QtWidgets.QCheckBox):
+    """Checkbox with a theme-independent checked indicator."""
+
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setMinimumHeight(27)
+        metrics = QtGui.QFontMetrics(self.font())
+        self.setMinimumWidth(metrics.horizontalAdvance(text) + 30)
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        bounds = self.rect().adjusted(0, 0, -1, -1)
+        box_size = 16
+        box = QtCore.QRectF(
+            1,
+            (bounds.height() - box_size) / 2.0,
+            box_size,
+            box_size,
+        )
+        enabled = self.isEnabled()
+        if self.isChecked():
+            border = QtGui.QColor("#c3aa6b")
+            fill = QtGui.QColor("#245781")
+        else:
+            border = QtGui.QColor("#758b81")
+            fill = QtGui.QColor("#fdfcf6")
+        if not enabled:
+            border.setAlpha(120)
+            fill.setAlpha(120)
+
+        painter.setPen(QtGui.QPen(border, 2.0))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(box, 4.0, 4.0)
+
+        if self.isChecked():
+            painter.setPen(
+                QtGui.QPen(
+                    QtGui.QColor("#ffffff"),
+                    2.0,
+                    QtCore.Qt.SolidLine,
+                    QtCore.Qt.RoundCap,
+                    QtCore.Qt.RoundJoin,
+                )
+            )
+            path = QtGui.QPainterPath()
+            path.moveTo(box.left() + 3.5, box.center().y())
+            path.lineTo(box.left() + 7.0, box.bottom() - 4.0)
+            path.lineTo(box.right() - 3.0, box.top() + 4.0)
+            painter.drawPath(path)
+
+        text_color = self.palette().color(QtGui.QPalette.WindowText)
+        if not enabled:
+            text_color.setAlpha(130)
+        painter.setPen(text_color)
+        painter.setFont(self.font())
+        painter.drawText(
+            bounds.adjusted(box_size + 8, 0, 0, 0),
+            QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+            self.text(),
+        )
+        painter.end()
+
+
+class VideoSelectionDialog(QtWidgets.QFrame):
+    selected = QtCore.pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("videoPicker")
+        self.setFixedSize(560, 310)
+        self.hide()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        title = QtWidgets.QLabel("选择视频")
+        title.setObjectName("pickerTitle")
+        note = QtWidgets.QLabel(
+            "请选择内置视频，或选择 project/media 文件夹中的视频。"
+        )
+        note.setObjectName("dialogNote")
+        note.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(note)
+
+        self.video_list = QtWidgets.QListWidget()
+        self.video_list.itemDoubleClicked.connect(
+            lambda _item: self._accept_current()
+        )
+        layout.addWidget(self.video_list, 1)
+
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addStretch(1)
+        cancel_button = QtWidgets.QPushButton("取消")
+        open_button = QtWidgets.QPushButton("打开视频")
+        open_button.setObjectName("pickerPrimary")
+        cancel_button.clicked.connect(self.hide)
+        open_button.clicked.connect(self._accept_current)
+        button_row.addWidget(cancel_button)
+        button_row.addWidget(open_button)
+        layout.addLayout(button_row)
+
+        self._labels = []
+        self._paths = {}
+
+        self.setStyleSheet(
+            "QFrame#videoPicker { background: #f5f1e3; color: #17365a;"
+            " border: 3px solid #17365a; }"
+            "QFrame#videoPicker QLabel { color: #17365a;"
+            " font-family: 'Microsoft YaHei'; font-size: 10pt; }"
+            "QLabel#pickerTitle { font-size: 16pt; font-weight: 700;"
+            " padding-bottom: 3px; }"
+            "QLabel#dialogNote { color: #4a6a80; padding: 2px; }"
+            "QListWidget { background: #fffdf5; color: #17365a;"
+            " border: 2px solid #17365a; border-radius: 3px; padding: 5px; }"
+            "QListWidget::item { min-height: 32px; padding: 4px 8px; }"
+            "QListWidget::item:selected { background: #245781; color: #fff8e6; }"
+            "QPushButton { background: #fffdf5; color: #17365a;"
+            " border: 1px solid #7894a5; min-width: 92px; min-height: 32px; }"
+            "QPushButton:hover { background: #e3ece8; border-color: #17365a; }"
+            "QPushButton#pickerPrimary { background: #245781; color: #fff8e6;"
+            " border-color: #b39758; }"
+        )
+
+    def open_options(self, labels, paths):
+        self._labels = list(labels)
+        self._paths = dict(zip(labels, paths))
+        self.video_list.clear()
+        self.video_list.addItems(self._labels)
+        self.video_list.setCurrentRow(0)
+        parent = self.parentWidget()
+        if parent is not None:
+            self.move(
+                max(12, (parent.width() - self.width()) // 2),
+                max(12, (parent.height() - self.height()) // 2),
+            )
+        self.show()
+        self.raise_()
+        self.video_list.setFocus()
+
+    def _accept_current(self):
+        item = self.video_list.currentItem()
+        if item is None:
+            return
+        path = self._paths.get(item.text())
+        if path:
+            self.hide()
+            self.selected.emit(path)
+
+
+class SkyReturnButton(FeedbackButton):
+    def __init__(self, audio, parent=None):
+        super().__init__("点击天空回到郊野", audio, parent)
+        self.setMinimumHeight(44)
+        self.setMinimumWidth(146)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+        self.setText("返回郊野")
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        bounds = QtCore.QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#17365a"), 1.8))
+        painter.setBrush(QtGui.QColor("#fbf8eb"))
+        painter.drawRect(bounds)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#b39758"), 0.8))
+        painter.drawRect(bounds.adjusted(4, 4, -4, -4))
+        painter.setPen(QtGui.QPen(QtGui.QColor("#477b9b"), 1.2))
+        painter.setBrush(QtCore.Qt.NoBrush)
+        painter.drawEllipse(
+            QtCore.QRectF(bounds.left() + 11, bounds.center().y() - 7, 14, 14)
+        )
+        painter.drawLine(
+            QtCore.QPointF(bounds.left() + 18, bounds.center().y() - 7),
+            QtCore.QPointF(bounds.left() + 18, bounds.center().y() - 14),
+        )
+        painter.setPen(QtGui.QColor("#17365a"))
+        painter.setFont(QtGui.QFont("Microsoft YaHei", 9, QtGui.QFont.DemiBold))
+        painter.drawText(
+            bounds.adjusted(34, 0, -7, 0),
+            QtCore.Qt.AlignCenter,
+            self.text(),
+        )
+        painter.end()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -16,15 +216,25 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.worker = worker
         self._processing = False
+        self._closing = False
         self._scrubbing = False
         self._seek_target = None
         self._video_frame_count = 0
         self._video_fps = 0.0
+        self._settings = QtCore.QSettings("NWPU", "SmartWasteSorting")
+        self.audio = AudioFeedback(self)
+        self._click_sound_enabled = self._settings.value("audio/click", True, type=bool)
+        self._music_enabled = self._settings.value("audio/music", False, type=bool)
+        self.audio.set_click_enabled(self._click_sound_enabled)
+        self.audio.set_music_enabled(self._music_enabled)
+        self._click_toggles = []
+        self._music_toggles = []
         self.count_labels = {}  # type: Dict[str, QtWidgets.QLabel]
         self.bin_labels = {}  # type: Dict[str, QtWidgets.QLabel]
         self._build_ui()
         self._connect_signals()
         self._auto_start = auto_start
+        self._worker_ready = False
         QtCore.QTimer.singleShot(50, self._initialize_worker)
 
     @QtCore.pyqtSlot()
@@ -38,23 +248,96 @@ class MainWindow(QtWidgets.QMainWindow):
             self.start_button.setEnabled(False)
             return
         self.worker.start()
+        self._worker_ready = True
         if self._auto_start:
-            QtCore.QTimer.singleShot(500, self.toggle_processing)
+            QtCore.QTimer.singleShot(500, self.enter_workspace)
 
     def _build_ui(self) -> None:
         self.setWindowTitle("智能垃圾分拣系统 · 招新考核")
-        self.resize(1280, 820)
-        self.setMinimumSize(960, 680)
-        central = QtWidgets.QWidget()
-        self.setCentralWidget(central)
-        root = QtWidgets.QVBoxLayout(central)
+        self.resize(1440, 900)
+        self.setMinimumSize(1180, 720)
+        self.pages = QtWidgets.QStackedWidget()
+        self.setCentralWidget(self.pages)
+        self._build_scene_page()
+
+        self.workspace_page = QtWidgets.QWidget()
+        self.pages.addWidget(self.workspace_page)
+        self._build_workspace_ui()
+
+    def _build_scene_page(self) -> None:
+        self.scene_page = QtWidgets.QWidget()
+        scene_stack = QtWidgets.QStackedLayout(self.scene_page)
+        scene_stack.setStackingMode(QtWidgets.QStackedLayout.StackAll)
+        self.landscape = PaintedLandscape()
+        scene_stack.addWidget(self.landscape)
+
+        overlay = SceneOverlay(self.landscape)
+        overlay.setStyleSheet("background: transparent;")
+        overlay_layout = QtWidgets.QVBoxLayout(overlay)
+        overlay_layout.setContentsMargins(18, 16, 18, 16)
+        audio_row = QtWidgets.QHBoxLayout()
+        audio_row.addStretch(1)
+        sound_controls = QtWidgets.QFrame()
+        sound_controls.setStyleSheet(
+            "QFrame { background: rgba(248, 248, 239, 225); border: 1px solid rgba(65, 92, 82, 90); border-radius: 11px; }"
+            "QCheckBox { color: #355853; font-weight: 600; spacing: 7px; padding: 5px 8px; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }"
+            "QCheckBox::indicator:checked { background: #c89a57; border: 2px solid #f1dfbb; border-radius: 4px; }"
+            "QCheckBox::indicator:unchecked { background: #e5ebe2; border: 2px solid #758b81; border-radius: 4px; }"
+        )
+        sound_layout = QtWidgets.QHBoxLayout(sound_controls)
+        sound_layout.setContentsMargins(4, 2, 4, 2)
+        self.scene_click_toggle = self._make_audio_toggle("按键声", self._click_sound_enabled, self._click_toggles)
+        self.scene_music_toggle = self._make_audio_toggle(
+            "背景音乐《脚踏车》",
+            self._music_enabled,
+            self._music_toggles,
+            available=self.audio.music_available,
+        )
+        sound_layout.addWidget(self.scene_click_toggle)
+        sound_layout.addWidget(self.scene_music_toggle)
+        audio_row.addWidget(sound_controls)
+        overlay_layout.addLayout(audio_row)
+        overlay_layout.addStretch(1)
+        scene_stack.addWidget(overlay)
+        scene_stack.setCurrentWidget(overlay)
+        self.pages.addWidget(self.scene_page)
+        self.pages.setCurrentWidget(self.scene_page)
+
+    def _make_audio_toggle(self, label, checked, group, available=None):
+        toggle = AudioCheckBox(label)
+        if available is None:
+            available = self.audio.available
+        toggle.setEnabled(available)
+        toggle.setChecked(bool(checked) if available else False)
+        if not available:
+            toggle.setToolTip("当前运行环境没有可用的音频输出设备")
+        group.append(toggle)
+        return toggle
+
+    def _build_workspace_ui(self) -> None:
+        from .workspace import build_workspace
+
+        self.sky_button_factory = SkyReturnButton
+        build_workspace(self)
+        return
+
+        root = QtWidgets.QVBoxLayout(self.workspace_page)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(9)
 
         header = QtWidgets.QHBoxLayout()
+        self.sky_button = SkyReturnButton(self.audio)
+        header.addWidget(self.sky_button)
         title = QtWidgets.QLabel("智能垃圾分拣上位机")
         title.setObjectName("titleLabel")
-        title.setFont(QtGui.QFont("Microsoft YaHei", 18, QtGui.QFont.Bold))
+        title.setFont(QtGui.QFont("Microsoft YaHei", 19, QtGui.QFont.Bold))
         header.addWidget(title)
         header.addStretch(1)
+        self.workspace_click_toggle = self._make_audio_toggle("按键声", self._click_sound_enabled, self._click_toggles)
+        self.workspace_music_toggle = self._make_audio_toggle("背景音乐", self._music_enabled, self._music_toggles)
+        header.addWidget(self.workspace_click_toggle)
+        header.addWidget(self.workspace_music_toggle)
         header.addWidget(QtWidgets.QLabel("系统状态："))
         self.state_label = QtWidgets.QLabel("等待启动")
         self.state_label.setMinimumWidth(130)
@@ -152,13 +435,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         controls = QtWidgets.QGroupBox("运行控制")
         controls_layout = QtWidgets.QHBoxLayout(controls)
-        self.video_button = QtWidgets.QPushButton("导入视频")
-        self.camera_button = QtWidgets.QPushButton("打开摄像头")
-        self.start_button = QtWidgets.QPushButton("开始识别")
+        self.video_button = FeedbackButton("导入视频", self.audio)
+        self.camera_button = FeedbackButton("打开摄像头", self.audio)
+        self.start_button = FeedbackButton("开始识别", self.audio)
         self.start_button.setObjectName("primaryButton")
-        self.reset_button = QtWidgets.QPushButton("重置统计")
+        self.reset_button = FeedbackButton("重置统计", self.audio)
         self.reset_button.setObjectName("secondaryButton")
-        self.quit_button = QtWidgets.QPushButton("退出")
+        self.quit_button = FeedbackButton("退出", self.audio)
         self.quit_button.setObjectName("quitButton")
         controls_layout.addWidget(self.video_button)
         controls_layout.addWidget(self.camera_button)
@@ -169,25 +452,27 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(controls)
 
         self.setStyleSheet(
-            "QMainWindow { background: #edf2f3; }"
-            "QWidget { color: #263638; font-family: 'Microsoft YaHei'; font-size: 10pt; }"
-            "QGroupBox { background: #ffffff; border: 1px solid #d3dddf; border-radius: 5px; "
+            "QMainWindow { background: #dfe9e5; }"
+            "QWidget { color: #243538; font-family: 'Microsoft YaHei'; font-size: 10pt; }"
+            "QGroupBox { background: #fbf8ee; border: 1px solid #c6d0c2; border-radius: 5px; "
             "font-weight: 600; margin-top: 10px; padding: 8px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #344b4c; }"
-            "QPushButton { background: #ffffff; border: 1px solid #c6d2d4; border-radius: 4px; "
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #214a4b; }"
+            "QPushButton { background: #fffdf4; border: 1px solid #b9c7bd; border-radius: 4px; "
             "min-width: 98px; min-height: 34px; padding: 0 10px; }"
-            "QPushButton:hover { background: #e8f3f1; border-color: #16877b; }"
-            "QPushButton:pressed { background: #d5e8e5; }"
-            "QPushButton#primaryButton { background: #087f73; color: #ffffff; border-color: #087f73; font-weight: 600; }"
-            "QPushButton#primaryButton:hover { background: #066d63; }"
-            "QPushButton#quitButton:hover { background: #fff0ee; border-color: #c45145; color: #a53d33; }"
-            "QPlainTextEdit { background: #fbfcfc; border: 1px solid #d6dfe1; "
+            "QPushButton:hover { background: #e6f3ed; border-color: #31877e; }"
+            "QPushButton:pressed { background: #d1e8df; }"
+            "QPushButton#primaryButton { background: #176f72; color: #ffffff; border-color: #176f72; font-weight: 600; }"
+            "QPushButton#primaryButton:hover { background: #0f5c62; }"
+            "QPushButton#quitButton:hover { background: #ffede3; border-color: #c45f49; color: #9e4437; }"
+            "QPlainTextEdit { background: #f7f6ed; border: 1px solid #c8d2c8; "
             "font-family: Consolas, monospace; font-size: 9pt; }"
-            "QLabel#titleLabel { color: #163f3d; }"
-            "QLabel#stateLabel, QLabel#connectionLabel { background: #e7eeee; border-radius: 3px; padding: 3px 6px; }"
-            "QSlider::groove:horizontal { height: 5px; background: #d6e0e1; border-radius: 2px; }"
-            "QSlider::sub-page:horizontal { background: #16877b; border-radius: 2px; }"
-            "QSlider::handle:horizontal { width: 13px; margin: -5px 0; border-radius: 6px; background: #087f73; }"
+            "QLabel#titleLabel { color: #123f45; }"
+            "QLabel#stateLabel, QLabel#connectionLabel { background: #d7e5dc; border-radius: 3px; padding: 3px 6px; }"
+            "QSlider::groove:horizontal { height: 5px; background: #c4d0c6; border-radius: 2px; }"
+            "QSlider::sub-page:horizontal { background: #2c8b83; border-radius: 2px; }"
+            "QSlider::handle:horizontal { width: 13px; margin: -5px 0; border-radius: 6px; background: #dd9950; }"
+            "QCheckBox { spacing: 6px; color: #254d50; }"
+            "QCheckBox::indicator { width: 15px; height: 15px; }"
         )
 
     def _connect_signals(self) -> None:
@@ -196,6 +481,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.start_button.clicked.connect(self.toggle_processing)
         self.reset_button.clicked.connect(self.worker.request_reset)
         self.quit_button.clicked.connect(self.close)
+        self.landscape.computer_activated.connect(self.enter_workspace)
+        self.sky_button.clicked.connect(self.return_to_scene)
+        for toggle in self._click_toggles:
+            toggle.toggled.connect(self.set_click_sound_enabled)
+        for toggle in self._music_toggles:
+            toggle.toggled.connect(self.set_music_enabled)
         self.progress_slider.sliderPressed.connect(self.begin_scrubbing)
         self.progress_slider.sliderReleased.connect(self.seek_video)
         self.progress_slider.valueChanged.connect(self.update_scrub_time)
@@ -209,24 +500,61 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.source_finished.connect(self.on_source_finished)
         self.worker.log_message.connect(self.append_log)
         self.worker.connection_changed.connect(self.update_connection)
-        self.worker.fps_changed.connect(lambda value: self.fps_label.setText("{:.0f}".format(value)))
+        self.worker.fps_changed.connect(lambda value: self.fps_label.setText("{:.0f} FPS".format(value)))
         self.worker.progress_changed.connect(self.update_progress)
 
     @QtCore.pyqtSlot()
     def import_video(self) -> None:
         """选择视频文件并请求后台线程切换输入源。"""
+        if self.worker.camera_source:
+            self._import_docker_video()
+            return
         path, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "选择视频",
-            str(Path.cwd()),
+            os.environ.get("VIDEO_DIALOG_DIR", str(Path.cwd())),
             "视频文件 (*.mp4 *.avi *.mov *.mkv *.wmv);;所有文件 (*)",
         )
         if path:
-            self.worker.request_source("video", path)
+            self._activate_source("video", path)
+
+    def _activate_source(self, kind, value):
+        self.worker.request_source(kind, value)
+        if not self._processing:
+            self._set_processing(True)
+
+    def _import_docker_video(self) -> None:
+        base = Path(os.environ.get("VIDEO_DIALOG_DIR", "/host-media"))
+        extensions = {".mp4", ".avi", ".mov", ".mkv", ".wmv"}
+        candidates = [
+            ("演示视频", Path.cwd() / "assets" / "assessment_demo.mp4"),
+            ("长视频", Path.cwd() / "vedio" / "dep.mp4"),
+        ]
+        if base.is_dir():
+            for path in sorted(base.iterdir(), key=lambda item: item.name.lower()):
+                if path.is_file() and path.suffix.lower() in extensions:
+                    candidates.append(("宿主文件夹", path))
+        labels = [
+            "{}  ·  {}".format(group, path.name)
+            for group, path in candidates
+        ]
+        if not hasattr(self, "video_picker"):
+            self.video_picker = VideoSelectionDialog(self.workspace_page)
+            self.video_picker.selected.connect(
+                lambda path: self._activate_source("video", path)
+            )
+        self.video_picker.open_options(
+            labels,
+            [str(path) for _group, path in candidates],
+        )
 
     @QtCore.pyqtSlot()
     def open_camera(self) -> None:
         """选择摄像头编号并请求后台线程切换输入源。"""
+        if self.worker.camera_source:
+            self.append_log("正在连接宿主机摄像头桥")
+            self._activate_source("camera", self.worker.camera_source)
+            return
         camera_index, accepted = QtWidgets.QInputDialog.getInt(
             self,
             "打开摄像头",
@@ -237,7 +565,7 @@ class MainWindow(QtWidgets.QMainWindow):
             1,
         )
         if accepted:
-            self.worker.request_source("camera", str(camera_index))
+            self._activate_source("camera", str(camera_index))
 
     @QtCore.pyqtSlot()
     def seek_video(self) -> None:
@@ -296,6 +624,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot(str)
     def update_source(self, name: str) -> None:
         self.source_label.setText(name)
+        self.source_label.setToolTip(name)
         self._scrubbing = False
         self._seek_target = None
         if not self._processing:
@@ -314,6 +643,42 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.worker.pause_processing()
             self.start_button.setText("开始识别")
+
+    @QtCore.pyqtSlot()
+    def enter_workspace(self) -> None:
+        self.pages.setCurrentWidget(self.workspace_page)
+        if self._worker_ready and not self._processing:
+            self._set_processing(True)
+            self.append_log("进入工作台，视觉识别已启动")
+
+    @QtCore.pyqtSlot()
+    def return_to_scene(self) -> None:
+        self._set_processing(False)
+        if hasattr(self, "video_picker"):
+            self.video_picker.hide()
+        self.pages.setCurrentWidget(self.scene_page)
+
+    @QtCore.pyqtSlot(bool)
+    def set_click_sound_enabled(self, enabled: bool) -> None:
+        self._click_sound_enabled = bool(enabled)
+        self.audio.set_click_enabled(enabled)
+        self._settings.setValue("audio/click", self._click_sound_enabled)
+        for toggle in self._click_toggles:
+            toggle.blockSignals(True)
+            toggle.setChecked(self._click_sound_enabled if self.audio.available else False)
+            toggle.blockSignals(False)
+
+    @QtCore.pyqtSlot(bool)
+    def set_music_enabled(self, enabled: bool) -> None:
+        self._music_enabled = bool(enabled)
+        self.audio.set_music_enabled(enabled)
+        self._settings.setValue("audio/music", self._music_enabled)
+        for toggle in self._music_toggles:
+            toggle.blockSignals(True)
+            toggle.setChecked(
+                self._music_enabled if self.audio.music_available else False
+            )
+            toggle.blockSignals(False)
 
     @QtCore.pyqtSlot()
     def toggle_processing(self) -> None:
@@ -393,7 +758,26 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self._closing:
+            event.accept()
+            return
+        self._closing = True
+        self.setEnabled(False)
+        self.setWindowTitle("正在安全关闭识别线程…")
+        self.audio.stop()
         self.worker.stop()
-        if not self.worker.wait(5000):
-            self.append_log("工作线程未在规定时间内退出")
-        event.accept()
+        event.ignore()
+        if not self._worker_ready or not self.worker.isRunning():
+            QtCore.QTimer.singleShot(0, self.close)
+            return
+        self._shutdown_timer = QtCore.QTimer(self)
+        self._shutdown_timer.setInterval(100)
+        self._shutdown_timer.timeout.connect(self._finish_shutdown)
+        self._shutdown_timer.start()
+
+    @QtCore.pyqtSlot()
+    def _finish_shutdown(self) -> None:
+        if self.worker.isRunning():
+            return
+        self._shutdown_timer.stop()
+        self.close()

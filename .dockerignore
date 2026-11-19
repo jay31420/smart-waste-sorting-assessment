@@ -1,8 +1,17 @@
 .git
 .github
 __pycache__
+**/__pycache__
 *.pyc
 .pytest_cache
 .venv
 venv
 grader
+.codex-build
+deliverables
+tests
+tools
+*.log
+assets/landscape_source_redmond.jpg
+assets/nature_loop.wav
+assets/LANDSCAPE_SOURCE.md

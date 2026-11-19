@@ -57,6 +57,7 @@ class SortingController:
         self._deadline = 0.0
         self._retry_count = 0
         self._compress_sent = False
+        self._rearm_after_action = False
         self._sequence = 0
         self._active_sequence = None  # type: Optional[int]
 
@@ -76,6 +77,20 @@ class SortingController:
         self._compress_sent = False
         self._emit("counts", values=self.named_counts())
         self._emit("bins", values=self.named_bins())
+
+    def on_input_boundary(self) -> None:
+        """Treat a source change or completed video pass as a fresh stream."""
+        self._candidate = None
+        self._stable_count = 0
+        self._missing_frames = 0
+        if self.state == SystemState.COOLDOWN:
+            self._set_state(SystemState.IDLE)
+        elif self.state in (
+            SystemState.WAIT_ACK,
+            SystemState.EXECUTING,
+            SystemState.COMPRESSING,
+        ):
+            self._rearm_after_action = True
 
     def named_counts(self) -> Dict[str, int]:
         return {WASTE_NAMES[key]: value for key, value in self.counts.items()}
@@ -213,10 +228,18 @@ class SortingController:
                 self._emit("counts", values=self.named_counts())
                 self.pending = None
                 self._missing_frames = 0
-                self._set_state(SystemState.COOLDOWN)
+                if self._rearm_after_action:
+                    self._rearm_after_action = False
+                    self._set_state(SystemState.IDLE)
+                else:
+                    self._set_state(SystemState.COOLDOWN)
                 self._maybe_compress()
             elif completed_command == Command.START_COMPRESS:
-                self._set_state(SystemState.COOLDOWN)
+                if self._rearm_after_action:
+                    self._rearm_after_action = False
+                    self._set_state(SystemState.IDLE)
+                else:
+                    self._set_state(SystemState.COOLDOWN)
             return
 
         if packet.command == Command.BIN_FULL:

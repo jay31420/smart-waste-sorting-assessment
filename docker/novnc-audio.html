@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智能垃圾视觉分拣系统</title>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #edf1ec;
+      font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    }
+
+    #vnc-frame {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    #music-status {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      z-index: 20;
+      display: none;
+      padding: 8px 14px;
+      transform: translateX(-50%);
+      color: #173f40;
+      background: rgba(250, 252, 245, 0.94);
+      border: 1px solid rgba(70, 111, 101, 0.45);
+      border-radius: 18px;
+      box-shadow: 0 8px 24px rgba(22, 56, 51, 0.22);
+      backdrop-filter: blur(8px);
+    }
+  </style>
+</head>
+<body>
+  <iframe id="vnc-frame" title="智能垃圾分拣系统"></iframe>
+  <div id="music-status"></div>
+  <audio id="music" src="/music.mp3" loop preload="metadata"></audio>
+
+  <script>
+    const frame = document.getElementById("vnc-frame");
+    const audio = document.getElementById("music");
+    const status = document.getElementById("music-status");
+    let userActivated = false;
+    let musicEnabled = false;
+    let playPending = false;
+    let interactionBound = false;
+
+    function showStatus(message) {
+      status.textContent = message;
+      status.style.display = message ? "block" : "none";
+    }
+
+    async function syncMusicState() {
+      try {
+        const response = await fetch("/music_state.json?t=" + Date.now(), {
+          cache: "no-store"
+        });
+        const state = await response.json();
+        musicEnabled = Boolean(state.enabled);
+      } catch (error) {
+        return;
+      }
+
+      if (!musicEnabled) {
+        showStatus("");
+        if (!audio.paused) {
+          audio.pause();
+        }
+        return;
+      }
+
+      if (!userActivated) {
+        showStatus("背景音乐已开启，请点击画面允许播放");
+        return;
+      }
+
+      if (!audio.paused || playPending) {
+        return;
+      }
+
+      playPending = true;
+      try {
+        await audio.play();
+        showStatus("");
+      } catch (error) {
+        showStatus("请再点击一次画面，允许播放背景音乐");
+      } finally {
+        playPending = false;
+      }
+    }
+
+    function armAudio() {
+      userActivated = true;
+      if (musicEnabled && audio.paused && !playPending) {
+        playPending = true;
+        audio.play()
+          .then(() => showStatus(""))
+          .catch(() => showStatus("请再点击一次画面，允许播放背景音乐"))
+          .finally(() => {
+            playPending = false;
+          });
+      }
+      window.setTimeout(syncMusicState, 80);
+      window.setTimeout(syncMusicState, 320);
+    }
+
+    function bindVncInteraction() {
+      if (interactionBound) {
+        return;
+      }
+      try {
+        const vncWindow = frame.contentWindow;
+        vncWindow.document.addEventListener("pointerdown", armAudio, true);
+        interactionBound = true;
+      } catch (error) {
+        showStatus("音乐控制初始化失败");
+      }
+    }
+
+    frame.addEventListener("load", bindVncInteraction);
+    frame.src = "/vnc-core.html" + window.location.search;
+    window.setTimeout(bindVncInteraction, 500);
+    window.setInterval(syncMusicState, 100);
+    syncMusicState();
+  </script>
+</body>
+</html>

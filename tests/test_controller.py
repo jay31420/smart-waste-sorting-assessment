@@ -82,6 +82,31 @@ class ControllerTests(unittest.TestCase):
             self.controller.process_detection(self.detection)
         self.assertEqual(len(self.transport.sent), 2)
 
+    def test_new_video_pass_rearms_detection_without_clearing_counts(self):
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        sequence = self.transport.sent[0].payload[0]
+        self.transport.feed(Packet(Command.ACTION_DONE, bytes((sequence,))))
+        self.controller.poll()
+        self.assertEqual(self.controller.state, SystemState.COOLDOWN)
+
+        self.controller.on_input_boundary()
+        self.assertEqual(self.controller.state, SystemState.IDLE)
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        self.assertEqual(len(self.transport.sent), 2)
+        self.assertEqual(self.controller.counts[WasteType.RECYCLABLE], 1)
+
+    def test_video_boundary_during_action_rearms_after_matching_completion(self):
+        for _ in range(3):
+            self.controller.process_detection(self.detection)
+        sequence = self.transport.sent[0].payload[0]
+        self.controller.on_input_boundary()
+        self.transport.feed(Packet(Command.ACTION_DONE, bytes((sequence,))))
+        self.controller.poll()
+        self.assertEqual(self.controller.state, SystemState.IDLE)
+        self.assertEqual(self.controller.counts[WasteType.RECYCLABLE], 1)
+
     def test_action_done_for_another_sequence_does_not_count(self):
         for _ in range(3):
             self.controller.process_detection(self.detection)

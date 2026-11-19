@@ -32,11 +32,18 @@ def parse_args():
     )
     parser.add_argument("--weights", default=os.environ.get("YOLO_WEIGHTS", "Predict/best.pt"))
     parser.add_argument("--confidence", default=float(os.environ.get("YOLO_CONFIDENCE", "0.50")), type=float)
+    parser.add_argument("--camera-source", default=os.environ.get("CAMERA_SOURCE", ""))
     parser.add_argument("--auto-start", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
+    # On Windows, PyQt can initialize DLL search state in a way that prevents
+    # torch's c10.dll from loading afterwards. Import torch first so the desktop
+    # entry point and container entry point share the same detector behavior.
+    if os.name == "nt":
+        import torch  # noqa: F401
+
     from PyQt5 import QtCore, QtWidgets
 
     from .ui import MainWindow
@@ -55,6 +62,7 @@ def main() -> None:
         transport_kind=args.transport,
         serial_port=args.serial_port,
         baudrate=args.baudrate,
+        camera_source=args.camera_source,
     )
     window = MainWindow(worker, auto_start=args.auto_start)
     window.show()

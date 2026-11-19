@@ -7,3 +7,5 @@ Dockerfile* text eol=lf
 *.txt text eol=lf
 *.pt binary
 *.mp4 binary
+*.pptx binary
+*.pdf binary

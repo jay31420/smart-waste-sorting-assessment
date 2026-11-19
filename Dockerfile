@@ -1,5 +1,6 @@
 # Reproducible PC/amd64 assessment image with CPU YOLO inference.
-FROM ultralytics/ultralytics:8.4.201-cpu
+ARG YOLO_BASE_IMAGE=docker.m.daocloud.io/ultralytics/ultralytics:8.4.201-cpu
+FROM ${YOLO_BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
@@ -10,7 +11,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     QT_X11_NO_MITSHM=1 \
     YOLO_CONFIG_DIR=/tmp/Ultralytics
 
-RUN apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 update \
+RUN for source in /etc/apt/sources.list /etc/apt/sources.list.d/*; do \
+      [ -f "$source" ] || continue; \
+      sed -i \
+        -e 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+        -e 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' \
+        "$source"; \
+    done \
+    && apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 update \
     && apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 install -y --fix-missing --no-install-recommends \
     fonts-wqy-zenhei \
     libegl1 \
@@ -19,9 +27,8 @@ RUN apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 update \
     libxkbcommon-x11-0 \
     novnc \
     openbox \
+    tigervnc-standalone-server \
     websockify \
-    x11vnc \
-    xvfb \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir PyQt5==5.15.11 pyserial==3.5
 
@@ -37,7 +44,12 @@ RUN apt-get -o Acquire::Retries=10 -o Acquire::http::Timeout=30 update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
-COPY . /workspace
+COPY Predict /workspace/Predict
+COPY assets /workspace/assets
+COPY vedio /workspace/vedio
+COPY simulator /workspace/simulator
+COPY docker /workspace/docker
+COPY app /workspace/app
 RUN chmod +x /workspace/docker/start-ui.sh
 
 EXPOSE 6080 5900

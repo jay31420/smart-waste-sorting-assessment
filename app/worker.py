@@ -53,6 +53,7 @@ class SortingWorker(QtCore.QThread):
         transport_kind: str = "tcp",
         serial_port: str = "/dev/ttyUSB0",
         baudrate: int = 9600,
+        camera_source: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -65,6 +66,7 @@ class SortingWorker(QtCore.QThread):
         self.transport_kind = transport_kind
         self.serial_port = serial_port
         self.baudrate = baudrate
+        self.camera_source = camera_source
         self._stop_event = threading.Event()
         self._running_event = threading.Event()
         self._settings_lock = threading.Lock()
@@ -154,14 +156,20 @@ class SortingWorker(QtCore.QThread):
                 old_source, self._source = self._source, new_source
                 if old_source is not None:
                     old_source.release()
-                self._at_video_end = False
+                    if self._controller is not None:
+                        self._controller.on_input_boundary()
+                with self._settings_lock:
+                    self._at_video_end = False
                 self.source_changed.emit(new_source.display_name)
                 self._emit_progress(0)
                 self.detection_changed.emit(None)
                 self.log_message.emit("图像源已切换：{}".format(new_source.display_name))
         if restart_requested and self._source is not None:
             if self._source.restart():
-                self._at_video_end = False
+                with self._settings_lock:
+                    self._at_video_end = False
+                if self._controller is not None:
+                    self._controller.on_input_boundary()
                 self._emit_progress(0)
                 self.log_message.emit("视频已从头开始")
         if seek_request is not None:
@@ -170,7 +178,11 @@ class SortingWorker(QtCore.QThread):
             elif not self._source.seek_frame(seek_request):
                 self.log_message.emit("视频跳转失败：帧位置超出范围")
             else:
-                self._at_video_end = False
+                with self._settings_lock:
+                    self._at_video_end = False
+                if self._controller is not None:
+                    self._controller.on_input_boundary()
+                self.detection_changed.emit(None)
                 self._emit_progress(seek_request)
                 if not self._running_event.is_set():
                     ok, frame = self._source.read()
@@ -269,8 +281,11 @@ class SortingWorker(QtCore.QThread):
                 ok, frame = self._source.read() if self._source is not None else (False, None)
                 if not ok or frame is None:
                     if self._source is not None and self._source.kind == "video":
-                        self._at_video_end = True
+                        with self._settings_lock:
+                            self._at_video_end = True
                         self._running_event.clear()
+                        if self._controller is not None:
+                            self._controller.on_input_boundary()
                         self.detection_changed.emit(None)
                         self.source_finished.emit()
                         if self._source.frame_count and self._source.current_frame >= self._source.frame_count:

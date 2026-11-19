@@ -14,6 +14,8 @@
 - 通信层支持 TCP 与串口，解析器处理分片、粘连、噪声、校验错误和重新同步。
 - 状态机要求连续稳定识别后发送指令，按原序号重试；只在匹配的 `ACTION_DONE` 到达后更新数量，并等待目标离开后重新布防。
 - PyQt 界面展示检测画面、分类结果、计数、满载状态、连接状态、FPS 和 TX/RX 帧日志。
+- 开场页以动态郊野分拣场景呈现项目；点击电脑进入工作台，点击顶部云朵控件返回。可分别关闭按键声和自然轻音乐；偏好会保存在本机设置中。
+- 视频播完后可从头重播；每次新一轮会清空连续帧候选状态，但保留已完成的分拣计数。关闭窗口时会等待后台识别线程完成清理，再退出。
 
 考核评分、协议细节和现场验收要求见 [TASKS.md](TASKS.md) 与 [PROTOCOL.md](PROTOCOL.md)。
 
@@ -61,6 +63,24 @@ python -m simulator.lower_simulator
 ```bash
 python -m app.main --auto-start
 ```
+
+如果要验证声音资源，可以在本地重新生成：
+
+```bash
+python tools/generate_scene_audio.py
+```
+
+声音依赖系统可用的音频输出设备；无输出设备时，两个声音开关会禁用，识别和分拣功能不受影响。
+
+## 答辩材料
+
+- 演示步骤与常见追问见 [DEFENSE_SCRIPT.md](DEFENSE_SCRIPT.md)。
+- 最新可编辑幻灯片：`deliverables/smart-waste-sorting-defense-final.pptx`。
+- 展示/打印版：`deliverables/smart-waste-sorting-defense-final.pdf`。PDF 按幻灯片页面渲染，文字不可选；演讲备注和可编辑内容以 PPTX 为准。
+
+## Docker 摄像头与宿主媒体
+
+宿主摄像头桥用于把 Windows 摄像头画面送入 Docker 工作台。启动方式、`media` 文件夹和 `HOST_MEDIA_DIR` 配置见 [HOST_CAMERA.md](HOST_CAMERA.md)。
 
 ## Jetson Nano
 

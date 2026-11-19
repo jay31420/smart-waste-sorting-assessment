@@ -1,5 +1,6 @@
 # Small multi-architecture image for the hardware-free lower-controller simulator.
-FROM python:3.11-slim-bookworm
+ARG PYTHON_BASE_IMAGE=docker.m.daocloud.io/library/python:3.11-slim-bookworm
+FROM ${PYTHON_BASE_IMAGE}
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /workspace

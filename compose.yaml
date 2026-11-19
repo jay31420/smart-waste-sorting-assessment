@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.sim
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.11-slim-bookworm}
     command: ["python3", "-m", "simulator.lower_simulator", "--host", "0.0.0.0", "--port", "9000"]
     healthcheck:
       test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1',9000),1); s.close()"]
@@ -15,6 +17,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        YOLO_BASE_IMAGE: ${YOLO_BASE_IMAGE:-docker.m.daocloud.io/ultralytics/ultralytics:8.4.201-cpu}
     environment:
       SIM_HOST: lower-sim
       SIM_PORT: "9000"
@@ -22,6 +26,13 @@ services:
       SOURCE: video
       SOURCE_VALUE: assets/assessment_demo.mp4
       YOLO_WEIGHTS: Predict/best.pt
+      CAMERA_SOURCE: "http://host.docker.internal:8091/frame.jpg"
+      WEB_MUSIC_STATE_FILE: "/usr/share/novnc/music_state.json"
+      VIDEO_DIALOG_DIR: "/host-media"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "${HOST_MEDIA_DIR:-./media}:/host-media:ro"
     depends_on:
       lower-sim:
         condition: service_healthy
