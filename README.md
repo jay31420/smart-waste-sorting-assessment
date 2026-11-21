@@ -74,6 +74,7 @@ python tools/generate_scene_audio.py
 
 ## 设计说明与演示材料
 
+- 连续运行录屏（1920×1080、30 FPS、含讲解音轨）：`deliverables/smart-waste-sorting-demo-recording-final.mp4`。
 - 可编辑设计说明与流程幻灯片：`deliverables/smart-waste-sorting-defense-final.pptx`。
 - 展示/打印版：`deliverables/smart-waste-sorting-defense-final.pdf`。PDF 按幻灯片页面渲染，可编辑内容以 PPTX 为准。
 
