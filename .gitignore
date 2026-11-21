@@ -12,5 +12,6 @@ venv/
 .DS_Store
 Thumbs.db
 ~$*.pptx
+DEFENSE_SCRIPT.md
 media/*
 !media/.gitkeep
