@@ -17,7 +17,7 @@
 - 开场页以动态郊野分拣场景呈现项目；点击电脑进入工作台，点击顶部云朵控件返回。可分别关闭按键声和自然轻音乐；偏好会保存在本机设置中。
 - 视频播完后可从头重播；每次新一轮会清空连续帧候选状态，但保留已完成的分拣计数。关闭窗口时会等待后台识别线程完成清理，再退出。
 
-考核评分、协议细节和现场验收要求见 [TASKS.md](TASKS.md) 与 [PROTOCOL.md](PROTOCOL.md)。
+通信协议细节见 [PROTOCOL.md](PROTOCOL.md)。
 
 ## 测试
 
@@ -27,7 +27,7 @@
 python -m unittest discover -s tests -v
 ```
 
-公开测试覆盖协议编解码、控制器状态流转、YOLO 结果适配和两段视频的读取、跳转与重播。现场验收还会检查未公开的边界情况。
+测试覆盖协议编解码、控制器状态流转、YOLO 结果适配和两段视频的读取、跳转与重播。
 
 ## Docker 演示
 
@@ -49,7 +49,7 @@ http://localhost:6080/vnc.html?autoconnect=1&resize=scale
 docker compose down
 ```
 
-Compose 默认使用 `assets/assessment_demo.mp4` 和 `Predict/best.pt`。摄像头输入需要把设备映射进容器；电脑端完成考核不要求 Nano 硬件。
+Compose 默认使用 `assets/assessment_demo.mp4` 和 `Predict/best.pt`。摄像头输入需要把设备映射进容器；普通电脑演示不要求 Nano 硬件。
 
 ## 本机运行
 
@@ -72,11 +72,10 @@ python tools/generate_scene_audio.py
 
 声音依赖系统可用的音频输出设备；无输出设备时，两个声音开关会禁用，识别和分拣功能不受影响。
 
-## 答辩材料
+## 设计说明与演示材料
 
-- 演示步骤与常见追问见 [DEFENSE_SCRIPT.md](DEFENSE_SCRIPT.md)。
-- 最新可编辑幻灯片：`deliverables/smart-waste-sorting-defense-final.pptx`。
-- 展示/打印版：`deliverables/smart-waste-sorting-defense-final.pdf`。PDF 按幻灯片页面渲染，文字不可选；演讲备注和可编辑内容以 PPTX 为准。
+- 可编辑设计说明与流程幻灯片：`deliverables/smart-waste-sorting-defense-final.pptx`。
+- 展示/打印版：`deliverables/smart-waste-sorting-defense-final.pdf`。PDF 按幻灯片页面渲染，可编辑内容以 PPTX 为准。
 
 ## Docker 摄像头与宿主媒体
 
@@ -93,6 +92,3 @@ docker compose -f compose.yaml -f compose.nano.yaml up --build
 
 使用板载摄像头或串口时，按实际设备增加 `/dev/video0` 或 `/dev/ttyUSB0` 映射。
 
-## 提交材料
-
-按任务书准备 3–4 分钟连续运行录屏、6–10 页设计说明 PPT 和可访问的 GitHub 源码链接。演示需要体现真实权重推理、下位机确认后的计数和视频输入控制；提交后会进行现场代码问答。

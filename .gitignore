@@ -13,5 +13,8 @@ venv/
 Thumbs.db
 ~$*.pptx
 DEFENSE_SCRIPT.md
+TASKS.md
+tools/build_defense_deck.mjs
+tools/export_defense_pdf.py
 media/*
 !media/.gitkeep
